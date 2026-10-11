@@ -1,10 +1,12 @@
-export function createScheduler({ intervalMs, task, logger, setTimer = setTimeout, clearTimer = clearTimeout, now = Date.now }) {
+export function createScheduler({ intervalMs, task, logger, setTimer = setTimeout, clearTimer = clearTimeout, now = Date.now, initialNextRunAt = null }) {
   let currentIntervalMs = intervalMs;
   let enabled = false;
   let running = false;
   let timer;
   let lastRunAt = null;
-  let nextRunAt = null;
+  let nextRunAt = initialNextRunAt && Number.isFinite(new Date(initialNextRunAt).getTime())
+    ? new Date(initialNextRunAt)
+    : null;
 
   const cancelTimer = () => {
     if (timer) clearTimer(timer);
@@ -62,15 +64,16 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
       if (value) this.start();
       else this.stop();
     },
-    setIntervalMs(value) {
+    setIntervalMs(value, { preserveNextRunAt = false } = {}) {
       if (!Number.isSafeInteger(value) || value < 60 * 60 * 1000 || value > 168 * 60 * 60 * 1000) {
         throw new RangeError('O intervalo do agendador deve ficar entre 1 e 168 horas.');
       }
       if (currentIntervalMs === value) return;
       currentIntervalMs = value;
-      if (enabled && running) nextRunAt = new Date(lastRunAt.getTime() + currentIntervalMs);
-      else if (enabled) {
-        nextRunAt = null;
+      if (enabled && running) {
+        if (!preserveNextRunAt) nextRunAt = new Date(lastRunAt.getTime() + currentIntervalMs);
+      } else if (enabled) {
+        if (!preserveNextRunAt) nextRunAt = null;
         scheduleNext();
       }
     },
