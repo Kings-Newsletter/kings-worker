@@ -83,6 +83,12 @@ app.get('/health', (_req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
+app.get('/', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!monitorEnabled) return res.status(404).send('Monitor não configurado.');
+  return res.type('html').send(monitorPage);
+});
+
 app.get('/monitor', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!monitorEnabled) return res.status(404).send('Monitor não configurado.');
