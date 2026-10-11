@@ -255,6 +255,7 @@ const runCheck = async () => {
 const scheduler = createScheduler({
   intervalMs: initialIntervalMs,
   initialNextRunAt: restoredNextRunAt,
+  initialLastRunAt: previousRun?.startedAt ?? null,
   task: runCheck,
   logger
 });
