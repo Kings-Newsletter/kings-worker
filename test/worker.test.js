@@ -5,12 +5,12 @@ import { createNewsletterClient } from '../src/clients/newsletter.js';
 import { createWorkerControlClient } from '../src/clients/control.js';
 import { getServerBinding } from '../src/server-config.js';
 
-test('server uses localhost and an operating-system-selected port by default', () => {
-  assert.deepEqual(getServerBinding({}), { host: 'localhost', port: 0 });
-  assert.deepEqual(getServerBinding({ HOST: ' localhost ', PORT: '' }), { host: 'localhost', port: 0 });
+test('server lets Node and the hosting platform choose the host and port by default', () => {
+  assert.deepEqual(getServerBinding({}), { host: undefined, port: 0 });
+  assert.deepEqual(getServerBinding({ HOST: ' ', PORT: '' }), { host: undefined, port: 0 });
 });
 
-test('server accepts a runtime-provided host and port and rejects invalid ports', () => {
+test('server accepts runtime-provided host and port and rejects invalid ports', () => {
   assert.deepEqual(getServerBinding({ HOST: 'worker.internal', PORT: '4312' }), { host: 'worker.internal', port: 4312 });
   assert.throws(() => getServerBinding({ PORT: '65536' }), /PORT deve ser um número inteiro/);
 });
@@ -26,6 +26,27 @@ test('scheduler uses configured interval and avoids overlapping ticks', async ()
   const scheduler = createScheduler({ intervalMs: 10800000, task: () => { calls++; return new Promise(r => { release = r; }); }, logger: { warn() {}, error() {} }, setTimer: (fn, ms) => { callback = fn; assert.equal(ms, 10800000); return 1; }, clearTimer() {} });
   scheduler.start(); const first = scheduler.tick(); await scheduler.tick(); assert.equal(calls, 1); release(); await first;
   scheduler.stop(); assert.equal(typeof callback, 'function');
+});
+
+test('scheduler accepts a custom next run time while enabled', () => {
+  let delay;
+  const target = new Date(Date.now() + 60_000);
+  const scheduler = createScheduler({ intervalMs: 10800000, task: async () => {}, logger: { warn() {}, error() {} }, setTimer: (_fn, ms) => { delay = ms; return 1; }, clearTimer() {} });
+  scheduler.start();
+  const scheduled = scheduler.setNextRunAt(target);
+  assert.equal(scheduled, target.toISOString());
+  assert.equal(scheduler.getState().nextRunAt, target.toISOString());
+  assert.ok(delay > 0 && delay <= 60_000);
+  scheduler.stop();
+});
+
+test('scheduler rejects custom next run times when disabled or invalid', () => {
+  const scheduler = createScheduler({ intervalMs: 10800000, task: async () => {}, logger: { warn() {}, error() {} } });
+  assert.throws(() => scheduler.setNextRunAt(new Date(Date.now() + 60_000)), /Ative o agendador/);
+  scheduler.start();
+  assert.throws(() => scheduler.setNextRunAt('not-a-date'), /inválida/);
+  assert.throws(() => scheduler.setNextRunAt(new Date(Date.now() - 60_000)), /futuro/);
+  scheduler.stop();
 });
 
 test('client remains disabled until all endpoint details are configured', async () => {
@@ -45,5 +66,3 @@ test('client retries transient server failures', async () => {
   const client = createNewsletterClient({ baseUrl: 'https://example.test', path: '/api/notify-news', method: 'POST', token: 'test-secret', maxRetries: 1, timeoutMs: 1000, retryBaseMs: 0 }, { sleep: async () => {}, fetchImpl: async () => { calls++; return calls === 1 ? { ok: false, status: 503, headers: { get: () => null } } : { ok: true, status: 200, json: async () => ({}) }; } });
   await client.request(); assert.equal(calls, 2);
 });
-
-
