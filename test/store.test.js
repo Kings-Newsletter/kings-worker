@@ -38,13 +38,12 @@ test('persists scheduler configuration, health and run history across restarts',
   store.close();
 
   const reopened = await createWorkerStore({ dbPath });
-  assert.deepEqual(reopened.getConfig(), {
-    enabled: true,
-    intervalMs: 3 * 60 * 60 * 1000,
-    nextRunAt: '2026-10-11T15:00:00.000Z',
-    scheduleMode: 'custom',
-    updatedAt: assert.match.any
-  });
+  const restoredConfig = reopened.getConfig();
+  assert.equal(restoredConfig.enabled, true);
+  assert.equal(restoredConfig.intervalMs, 3 * 60 * 60 * 1000);
+  assert.equal(restoredConfig.nextRunAt, '2026-10-11T15:00:00.000Z');
+  assert.equal(restoredConfig.scheduleMode, 'custom');
+  assert.ok(Number.isFinite(new Date(restoredConfig.updatedAt).getTime()));
   assert.equal(reopened.getRecentRuns(1)[0].status, 'failed');
   assert.equal(reopened.getRecentRuns(1)[0].errorCode, 'API_HTTP_503');
   assert.equal(reopened.getHealth().consecutiveFailures, 2);
