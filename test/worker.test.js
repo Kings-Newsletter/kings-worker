@@ -23,7 +23,7 @@ test('worker control requires HTTPS except for localhost development', () => {
 
 test('scheduler uses configured interval and avoids overlapping ticks', async () => {
   let callback; let calls = 0; let release;
-  const scheduler = createScheduler({ intervalMs: 10800000, task: () => { calls++; return new Promise(r => { release = r; }); }, logger: { warn() {}, error() {} }, setTimer: (fn, ms) => { callback = fn; assert.equal(ms, 10800000); return 1; }, clearTimer() {} });
+  const scheduler = createScheduler({ intervalMs: 10800000, task: () => { calls++; return new Promise(r => { release = r; }); }, logger: { warn() {}, error() {} }, now: () => 1000, setTimer: (fn, ms) => { callback = fn; assert.equal(ms, 10800000); return 1; }, clearTimer() {} });
   scheduler.start(); const first = scheduler.tick(); await scheduler.tick(); assert.equal(calls, 1); release(); await first;
   scheduler.stop(); assert.equal(typeof callback, 'function');
 });
