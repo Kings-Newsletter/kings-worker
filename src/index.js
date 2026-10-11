@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import express from 'express';
 import { createLogger } from './logger.js';
 import { createScheduler } from './scheduler.js';
@@ -27,14 +28,61 @@ const controlClient = createWorkerControlClient({
 });
 const workerId = randomUUID();
 const localSchedulerEnabled = process.env.SCHEDULER_ENABLED !== 'false';
+const monitorUsername = process.env.MONITOR_USERNAME?.trim();
+const monitorPassword = process.env.MONITOR_PASSWORD;
+const monitorEnabled = Boolean(monitorUsername && monitorPassword);
+const monitorPage = readFileSync(new URL('./monitor.html', import.meta.url), 'utf8');
 let lastRunStatus = null;
 let lastRunErrorCode = null;
+let lastControlSyncAt = null;
+let lastControlSyncStatus = null;
+let lastControlSyncErrorCode = null;
+
+function requireMonitorAuth(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!monitorEnabled) return res.status(404).json({ error: 'Not found' });
+
+  const [scheme, encoded] = (req.headers.authorization || '').split(' ', 2);
+  let supplied = '';
+  if (scheme?.toLowerCase() === 'basic' && encoded) {
+    try { supplied = Buffer.from(encoded, 'base64').toString('utf8'); } catch { supplied = ''; }
+  }
+
+  const suppliedBuffer = Buffer.from(supplied);
+  const expectedBuffer = Buffer.from(`${monitorUsername}:${monitorPassword}`);
+  const valid = suppliedBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(suppliedBuffer, expectedBuffer);
+
+  if (!valid) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="King Newsletter Worker Monitor", charset="UTF-8"');
+    return res.status(401).send('Autenticação necessária.');
+  }
+  return next();
+}
 
 app.get('/health', (_req, res) => res.json({
   status: 'ok',
   service: 'kings-newsletter-worker',
   timestamp: new Date().toISOString()
 }));
+
+app.get('/monitor', requireMonitorAuth, (_req, res) => res.type('html').send(monitorPage));
+
+app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
+  res.json({
+    service: 'kings-newsletter-worker',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+    apiConfigured: newsletterClient.isConfigured,
+    controlConfigured: controlClient.isConfigured,
+    scheduler: scheduler.getState(),
+    lastRunStatus,
+    lastRunErrorCode,
+    lastControlSyncAt,
+    lastControlSyncStatus,
+    lastControlSyncErrorCode
+  });
+});
 
 const runCheck = async () => {
   if (!newsletterClient.isConfigured) {
@@ -65,6 +113,9 @@ const scheduler = createScheduler({
 
 async function synchronizeControl() {
   if (!controlClient.isConfigured) return;
+  lastControlSyncAt = new Date().toISOString();
+  lastControlSyncStatus = 'running';
+  lastControlSyncErrorCode = null;
   try {
     const config = await controlClient.fetchConfig();
     if (!Number.isInteger(config.intervalHours) || config.intervalHours < 1 || config.intervalHours > 168 || typeof config.enabled !== 'boolean') {
@@ -83,14 +134,17 @@ async function synchronizeControl() {
       lastRunStatus,
       lastRunErrorCode
     });
+    lastControlSyncStatus = 'succeeded';
     logger.debug('Configuração do painel sincronizada', { revision: config.revision, intervalHours: config.intervalHours, enabled: state.enabled });
   } catch (error) {
+    lastControlSyncStatus = 'failed';
     const statusCode = error.message.match(/HTTP (\d{3})/i)?.[1];
-    logger.warn('Falha ao sincronizar com o painel', { errorCode: statusCode ? `CONTROL_HTTP_${statusCode}` : 'CONTROL_SYNC_FAILED' });
+    lastControlSyncErrorCode = statusCode ? `CONTROL_HTTP_${statusCode}` : 'CONTROL_SYNC_FAILED';
+    logger.warn('Falha ao sincronizar com o painel', { errorCode: lastControlSyncErrorCode });
   }
 }
 
-const controlPollMs = Math.max(10_000, Math.min(300_000, Number(process.env.WORKER_CONTROL_POLL_MS || 30_000)));
+const controlPollMs = Math.max(10_000, Math.min(300_000, Number(process.env.WORKER_CONTROL_POLL_MS || 30000)));
 let controlTimer;
 const { host, port } = getServerBinding();
 const server = app.listen(port, host, () => {
@@ -100,7 +154,8 @@ const server = app.listen(port, host, () => {
     port: typeof address === 'object' && address ? address.port : port,
     schedulerEnabled: localSchedulerEnabled,
     apiConfigured: newsletterClient.isConfigured,
-    controlConfigured: controlClient.isConfigured
+    controlConfigured: controlClient.isConfigured,
+    monitorEnabled
   });
   if (controlClient.isConfigured) {
     void synchronizeControl();
