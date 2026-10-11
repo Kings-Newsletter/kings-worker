@@ -40,9 +40,27 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_COOKIE = 'worker_monitor_session';
 let lastRunStatus = null;
 let lastRunErrorCode = null;
+let lastRunDurationMs = null;
+let lastSuccessfulRunAt = null;
+let consecutiveFailures = 0;
+const recentRuns = [];
+const MAX_RECENT_RUNS = 50;
 let lastControlSyncAt = null;
 let lastControlSyncStatus = null;
 let lastControlSyncErrorCode = null;
+
+function recordRun(startedAt, status, errorCode = null) {
+  const completedAt = new Date();
+  lastRunDurationMs = Math.max(0, completedAt.getTime() - startedAt.getTime());
+  recentRuns.unshift({
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: lastRunDurationMs,
+    status,
+    errorCode
+  });
+  if (recentRuns.length > MAX_RECENT_RUNS) recentRuns.length = MAX_RECENT_RUNS;
+}
 
 function equalSecret(supplied, expected) {
   const a = Buffer.from(String(supplied ?? ''));
@@ -124,6 +142,12 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
     scheduler: scheduler.getState(),
     lastRunStatus,
     lastRunErrorCode,
+    health: {
+      lastSuccessfulRunAt,
+      lastRunDurationMs,
+      consecutiveFailures
+    },
+    recentRuns,
     lastControlSyncAt,
     lastControlSyncStatus,
     lastControlSyncErrorCode
@@ -156,22 +180,32 @@ app.post('/monitor/schedule', requireMonitorAuth, (req, res) => {
 });
 
 const runCheck = async () => {
+  const startedAt = new Date();
+  lastRunStatus = 'running';
+  lastRunErrorCode = null;
+
   if (!newsletterClient.isConfigured) {
     lastRunStatus = 'skipped';
     lastRunErrorCode = 'NEWSLETTER_API_NOT_CONFIGURED';
+    recordRun(startedAt, lastRunStatus, lastRunErrorCode);
     logger.warn('Verificação não executada: integração sem configuração documentada');
     return;
   }
-  lastRunStatus = 'running';
-  lastRunErrorCode = null;
+
   try {
     const result = await newsletterClient.request();
     lastRunStatus = result.data?.sent ? 'succeeded' : 'skipped';
+    lastRunErrorCode = null;
+    lastSuccessfulRunAt = new Date().toISOString();
+    consecutiveFailures = 0;
+    recordRun(startedAt, lastRunStatus);
     logger.info('Resposta recebida da API', { status: result.status, runStatus: lastRunStatus });
   } catch (error) {
     lastRunStatus = 'failed';
     const statusCode = error.message.match(/HTTP (\d{3})/i)?.[1];
     lastRunErrorCode = statusCode ? `API_HTTP_${statusCode}` : 'API_REQUEST_FAILED';
+    consecutiveFailures += 1;
+    recordRun(startedAt, lastRunStatus, lastRunErrorCode);
     throw error;
   }
 };
