@@ -214,6 +214,12 @@ export async function createWorkerStore({
     getConfig,
     saveConfig,
     getHealth,
+    getState(key) { return state.get(key); },
+    saveState(key, value) {
+      if (typeof key !== 'string' || !key.trim()) throw new TypeError('A chave do estado é obrigatória.');
+      state.set(key, value);
+      persist();
+    },
     getLatestRun() { return getRecentRuns(1)[0] || null; },
     getRecentRuns,
     recordRun,
