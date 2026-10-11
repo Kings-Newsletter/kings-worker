@@ -23,6 +23,11 @@ test('persists scheduler configuration, health and run history across restarts',
     nextRunAt: '2026-10-11T15:00:00.000Z',
     scheduleMode: 'custom'
   });
+  store.saveState('controlSync', {
+    lastControlSyncAt: '2026-10-11T09:00:00.000Z',
+    lastControlSyncStatus: 'succeeded',
+    lastControlSyncErrorCode: null
+  });
   store.recordRun({
     startedAt,
     completedAt,
@@ -48,6 +53,11 @@ test('persists scheduler configuration, health and run history across restarts',
   assert.equal(reopened.getRecentRuns(1)[0].errorCode, 'API_HTTP_503');
   assert.equal(reopened.getHealth().consecutiveFailures, 2);
   assert.equal(reopened.getHealth().lastSuccessfulRunAt, '2026-10-11T07:00:00.000Z');
+  assert.deepEqual(reopened.getState('controlSync'), {
+    lastControlSyncAt: '2026-10-11T09:00:00.000Z',
+    lastControlSyncStatus: 'succeeded',
+    lastControlSyncErrorCode: null
+  });
   reopened.close();
 });
 
