@@ -229,8 +229,14 @@ app.post('/monitor/schedule', requireMonitorAuth, (req, res) => {
     logger.info('Próximo disparo atualizado pelo monitor', { nextRunAt: scheduledAt });
     return res.json({ nextRunAt: scheduledAt });
   } catch (error) {
-    const status = /agendador/i.test(error.message) ? 409 : 400;
-    return res.status(status).json({ error: error.message });
+    const status = /agendador/i.test(error.message)
+      ? 409
+      : error instanceof TypeError || error instanceof RangeError
+        ? 400
+        : 500;
+    return res.status(status).json({
+      error: status === 500 ? 'Não foi possível salvar o agendamento no armazenamento local.' : error.message
+    });
   }
 });
 
