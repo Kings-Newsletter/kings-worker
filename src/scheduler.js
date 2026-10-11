@@ -74,6 +74,15 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
         scheduleNext();
       }
     },
+    setNextRunAt(value) {
+      const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+      if (!Number.isFinite(date.getTime())) throw new TypeError('A data do próximo disparo é inválida.');
+      if (date.getTime() <= now()) throw new RangeError('O próximo disparo precisa estar no futuro.');
+      if (!enabled) throw new Error('Ative o agendador antes de alterar o próximo disparo.');
+      nextRunAt = date;
+      if (!running) scheduleNext();
+      return nextRunAt.toISOString();
+    },
     async tick() { return tick(); },
     getState() {
       return {
