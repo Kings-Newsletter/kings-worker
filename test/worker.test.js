@@ -34,6 +34,7 @@ test('scheduler restores a persisted next run and preserves it when the interval
   const scheduler = createScheduler({
     intervalMs: 10800000,
     initialNextRunAt: target,
+    initialLastRunAt: new Date(900_000),
     now: () => 1_000_000,
     task: async () => {},
     logger: { warn() {}, error() {} },
@@ -43,6 +44,7 @@ test('scheduler restores a persisted next run and preserves it when the interval
 
   scheduler.start();
   assert.equal(scheduler.getState().nextRunAt, target.toISOString());
+  assert.equal(scheduler.getState().lastRunAt, new Date(900_000).toISOString());
   scheduler.setIntervalMs(6 * 60 * 60 * 1000, { preserveNextRunAt: true });
   assert.equal(scheduler.getState().nextRunAt, target.toISOString());
   assert.equal(delay, 60_000);
