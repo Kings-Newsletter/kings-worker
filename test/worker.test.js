@@ -28,6 +28,46 @@ test('scheduler uses configured interval and avoids overlapping ticks', async ()
   scheduler.stop(); assert.equal(typeof callback, 'function');
 });
 
+test('scheduler restores a persisted next run and preserves it when the interval changes', () => {
+  let delay;
+  const target = new Date(1_060_000);
+  const scheduler = createScheduler({
+    intervalMs: 10800000,
+    initialNextRunAt: target,
+    now: () => 1_000_000,
+    task: async () => {},
+    logger: { warn() {}, error() {} },
+    setTimer: (_fn, ms) => { delay = ms; return 1; },
+    clearTimer() {}
+  });
+
+  scheduler.start();
+  assert.equal(scheduler.getState().nextRunAt, target.toISOString());
+  scheduler.setIntervalMs(6 * 60 * 60 * 1000, { preserveNextRunAt: true });
+  assert.equal(scheduler.getState().nextRunAt, target.toISOString());
+  assert.equal(delay, 60_000);
+  scheduler.stop();
+});
+
+test('scheduler can wait for an active task to finish', async () => {
+  let release;
+  const scheduler = createScheduler({
+    intervalMs: 10800000,
+    task: () => new Promise(resolve => { release = resolve; }),
+    logger: { warn() {}, error() {} },
+    setTimer: () => 1,
+    clearTimer() {}
+  });
+  scheduler.start();
+  const running = scheduler.tick();
+  const idle = scheduler.waitForIdle();
+  assert.equal(scheduler.getState().running, true);
+  release();
+  await Promise.all([running, idle]);
+  assert.equal(scheduler.getState().running, false);
+  scheduler.stop();
+});
+
 test('scheduler accepts a custom next run time while enabled', () => {
   let delay;
   const target = new Date(Date.now() + 60_000);
