@@ -13,26 +13,25 @@ const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(moduleDirectory, '../node_modules/sql.js/dist/sql-wasm.wasm');
 
 function createStateHelpers(db) {
-  const readStatement = db.prepare('SELECT value FROM worker_state WHERE key = ?');
-  const writeStatement = db.prepare(
-    'INSERT INTO worker_state (key, value) VALUES (?, ?) ' +
-    'ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-  );
-
   return {
     get(key) {
+      const statement = db.prepare('SELECT value FROM worker_state WHERE key = ?');
       try {
-        readStatement.bind([key]);
-        return readStatement.step() ? JSON.parse(readStatement.getAsObject().value) : null;
+        statement.bind([key]);
+        return statement.step() ? JSON.parse(statement.getAsObject().value) : null;
       } finally {
-        readStatement.reset();
+        statement.free();
       }
     },
     set(key, value) {
+      const statement = db.prepare(
+        'INSERT INTO worker_state (key, value) VALUES (?, ?) ' +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      );
       try {
-        writeStatement.run([key, JSON.stringify(value)]);
+        statement.run([key, JSON.stringify(value)]);
       } finally {
-        writeStatement.reset();
+        statement.free();
       }
     }
   };
@@ -219,6 +218,7 @@ export async function createWorkerStore({
     getRecentRuns,
     recordRun,
     close() {
+      persist();
       db.close();
     }
   };
