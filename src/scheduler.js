@@ -1,10 +1,12 @@
-export function createScheduler({ intervalMs, task, logger, setTimer = setTimeout, clearTimer = clearTimeout, now = Date.now, initialNextRunAt = null }) {
+export function createScheduler({ intervalMs, task, logger, setTimer = setTimeout, clearTimer = clearTimeout, now = Date.now, initialNextRunAt = null, initialLastRunAt = null }) {
   let currentIntervalMs = intervalMs;
   let enabled = false;
   let running = false;
   let timer;
   const idleResolvers = new Set();
-  let lastRunAt = null;
+  let lastRunAt = initialLastRunAt && Number.isFinite(new Date(initialLastRunAt).getTime())
+    ? new Date(initialLastRunAt)
+    : null;
   let nextRunAt = initialNextRunAt && Number.isFinite(new Date(initialNextRunAt).getTime())
     ? new Date(initialNextRunAt)
     : null;
