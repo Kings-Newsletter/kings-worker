@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import express from 'express';
 import { createLogger } from './logger.js';
@@ -10,6 +10,9 @@ import { getServerBinding } from './server-config.js';
 
 const logger = createLogger();
 const app = express();
+app.use(express.urlencoded({ extended: false, limit: '2kb' }));
+app.use(express.json({ limit: '2kb' }));
+
 const newsletterClient = createNewsletterClient({
   baseUrl: process.env.NEWSLETTER_API_BASE_URL,
   path: process.env.NEWSLETTER_API_PATH,
@@ -32,31 +35,45 @@ const monitorUsername = process.env.MONITOR_USERNAME?.trim();
 const monitorPassword = process.env.MONITOR_PASSWORD;
 const monitorEnabled = Boolean(monitorUsername && monitorPassword);
 const monitorPage = readFileSync(new URL('./monitor.html', import.meta.url), 'utf8');
+const monitorSessions = new Map();
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SESSION_COOKIE = 'worker_monitor_session';
 let lastRunStatus = null;
 let lastRunErrorCode = null;
 let lastControlSyncAt = null;
 let lastControlSyncStatus = null;
 let lastControlSyncErrorCode = null;
 
+function equalSecret(supplied, expected) {
+  const a = Buffer.from(String(supplied ?? ''));
+  const b = Buffer.from(String(expected ?? ''));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function readSession(req) {
+  const cookie = req.headers.cookie || '';
+  const match = cookie.split(';').map(part => part.trim()).find(part => part.startsWith(`${SESSION_COOKIE}=`));
+  if (!match) return null;
+  const token = match.slice(SESSION_COOKIE.length + 1);
+  const expiresAt = monitorSessions.get(token);
+  if (!expiresAt) return null;
+  if (expiresAt <= Date.now()) {
+    monitorSessions.delete(token);
+    return null;
+  }
+  return token;
+}
+
+function setSessionCookie(req, res, token, maxAgeSeconds) {
+  const secure = req.secure || req.get('x-forwarded-proto') === 'https' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/monitor; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure}`);
+}
+
 function requireMonitorAuth(req, res, next) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!monitorEnabled) return res.status(404).json({ error: 'Not found' });
-
-  const [scheme, encoded] = (req.headers.authorization || '').split(' ', 2);
-  let supplied = '';
-  if (scheme?.toLowerCase() === 'basic' && encoded) {
-    try { supplied = Buffer.from(encoded, 'base64').toString('utf8'); } catch { supplied = ''; }
-  }
-
-  const suppliedBuffer = Buffer.from(supplied);
-  const expectedBuffer = Buffer.from(`${monitorUsername}:${monitorPassword}`);
-  const valid = suppliedBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(suppliedBuffer, expectedBuffer);
-
-  if (!valid) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="King Newsletter Worker Monitor", charset="UTF-8"');
-    return res.status(401).send('Autenticação necessária.');
-  }
+  if (!monitorEnabled) return res.status(404).json({ error: 'Monitor não configurado.' });
+  const token = readSession(req);
+  if (!token) return res.status(401).json({ error: 'Sessão expirada ou não autenticada.' });
   return next();
 }
 
@@ -66,7 +83,30 @@ app.get('/health', (_req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.get('/monitor', requireMonitorAuth, (_req, res) => res.type('html').send(monitorPage));
+app.get('/monitor', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!monitorEnabled) return res.status(404).send('Monitor não configurado.');
+  return res.type('html').send(monitorPage);
+});
+
+app.post('/monitor/login', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!monitorEnabled) return res.status(404).json({ error: 'Monitor não configurado.' });
+  if (!equalSecret(req.body?.username, monitorUsername) || !equalSecret(req.body?.password, monitorPassword)) {
+    return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+  }
+  const token = randomBytes(32).toString('base64url');
+  monitorSessions.set(token, Date.now() + SESSION_TTL_MS);
+  setSessionCookie(req, res, token, SESSION_TTL_MS / 1000);
+  return res.json({ authenticated: true });
+});
+
+app.post('/monitor/logout', requireMonitorAuth, (req, res) => {
+  const token = readSession(req);
+  if (token) monitorSessions.delete(token);
+  setSessionCookie(req, res, '', 0);
+  return res.json({ loggedOut: true });
+});
 
 app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
   res.json({
@@ -82,6 +122,31 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
     lastControlSyncStatus,
     lastControlSyncErrorCode
   });
+});
+
+app.post('/monitor/schedule', requireMonitorAuth, (req, res) => {
+  const nextRunAt = req.body?.nextRunAt;
+  if (typeof nextRunAt !== 'string' || nextRunAt.length > 40) {
+    return res.status(400).json({ error: 'Informe uma data e horário válidos.' });
+  }
+  const date = new Date(nextRunAt);
+  if (!Number.isFinite(date.getTime())) {
+    return res.status(400).json({ error: 'A data informada é inválida.' });
+  }
+  if (date.getTime() <= Date.now()) {
+    return res.status(400).json({ error: 'O próximo disparo precisa estar no futuro.' });
+  }
+  if (date.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000) {
+    return res.status(400).json({ error: 'A data deve estar dentro dos próximos 366 dias.' });
+  }
+  try {
+    const scheduledAt = scheduler.setNextRunAt(date);
+    logger.info('Próximo disparo atualizado pelo monitor', { nextRunAt: scheduledAt });
+    return res.json({ nextRunAt: scheduledAt });
+  } catch (error) {
+    const status = /agendador/i.test(error.message) ? 409 : 400;
+    return res.status(status).json({ error: error.message });
+  }
 });
 
 const runCheck = async () => {
