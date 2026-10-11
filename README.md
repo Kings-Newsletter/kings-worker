@@ -10,7 +10,7 @@ Worker independente em Node.js + Express para executar verificações periódica
 - `npm test`
 - `npm start`
 
-O health check fica em `GET /health`. Se `PORT` estiver definida pela hospedagem, o worker usa essa porta; se estiver vazia, usa uma porta dinâmica. `HOST` é opcional: quando não definido, o Node.js escolhe o endereço de escuta padrão do ambiente. Não configure `HOST=localhost` em uma hospedagem que precise receber conexões externas. Configure `SCHEDULER_ENABLED=false` para manter o processo sem agendador.
+O health check fica em `GET /health`. Se `PORT` estiver definida pela hospedagem, o worker usa essa porta; se estiver vazia, usa uma porta dinâmica. `HOST` é opcional: quando não definido, o Node.js escolhe o endereço de escuta padrão do ambiente. Configure `SCHEDULER_ENABLED=false` para manter o processo sem agendador.
 
 ## Integração com a newsletter
 
@@ -24,20 +24,15 @@ O worker consulta a configuração a cada 30 segundos e envia um heartbeat com o
 
 ## Monitor web do worker
 
-A página fica em `/monitor` no host onde o worker está hospedado. Ela é somente de leitura e mostra o estado do processo, intervalo, última/próxima execução, resultado da última chamada à API e falhas de sincronização com o painel. Os dados são atualizados a cada 15 segundos. `/monitor/status` fornece os dados usados pela página.
+A página fica em `/monitor` no host onde o worker está hospedado. Configure `MONITOR_USERNAME` e `MONITOR_PASSWORD` nas variáveis de ambiente para habilitá-la. O painel apresenta uma tela de login própria; as sessões usam cookies `HttpOnly`, `SameSite=Strict` e expiram após 8 horas. Use HTTPS na hospedagem e uma senha exclusiva. Se as credenciais não estiverem configuradas, as rotas do monitor ficam desabilitadas.
 
-Para habilitá-la, configure estas variáveis no ambiente da hospedagem do worker:
+O painel atualiza o estado do worker a cada 15 segundos e mostra última execução, próximo disparo, intervalo, uptime, estado das integrações e falhas recentes. Usuários autenticados podem definir uma data e horário específicos para a próxima execução. A data deve estar no futuro e dentro dos próximos 366 dias, e o agendador precisa estar ativo. Após essa execução, o agendamento retorna ao intervalo automático configurado.
 
-- `MONITOR_USERNAME`: usuário de acesso.
-- `MONITOR_PASSWORD`: senha forte e exclusiva.
-
-Se alguma delas estiver vazia, as rotas `/monitor` e `/monitor/status` respondem 404. Com as credenciais configuradas, ambas exigem autenticação HTTP Basic. Use HTTPS na hospedagem e não reutilize a senha de `WORKER_CONTROL_SECRET` ou `NEWSLETTER_API_TOKEN`. O monitor não acessa MongoDB, não altera a API da newsletter e não dispara e-mails.
+A alteração manual do próximo disparo é mantida apenas na memória do processo: será perdida se o worker reiniciar ou se o agendamento for pausado. Ela não persiste a configuração no site, não altera a API da newsletter e não dispara e-mails imediatamente. Datas e horários são exibidos no fuso `America/Rio_Branco`.
 
 ## Agendamento e operação
 
-Quando o controle remoto está configurado, a configuração salva no site prevalece. O processo precisa permanecer ativo para executar as verificações. Datas do monitor são exibidas no fuso `America/Rio_Branco`; a API interna retorna datas ISO 8601.
-
-O agendador impede sobreposição dentro deste processo. Para múltiplas instâncias, implemente um lock distribuído ou fila antes de escalar.
+Quando o controle remoto está configurado, a configuração salva no site prevalece para habilitar/pausar o worker e definir o intervalo automático. O processo precisa permanecer ativo para executar as verificações. O agendador impede sobreposição dentro deste processo. Para múltiplas instâncias, implemente um lock distribuído ou fila antes de escalar.
 
 ## Retry e segurança
 
