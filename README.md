@@ -26,9 +26,17 @@ O worker consulta a configuração a cada 30 segundos e envia um heartbeat com o
 
 A página fica em `/monitor` no host onde o worker está hospedado. Configure `MONITOR_USERNAME` e `MONITOR_PASSWORD` nas variáveis de ambiente para habilitá-la. O painel apresenta uma tela de login própria; as sessões usam cookies `HttpOnly`, `SameSite=Strict` e expiram após 8 horas. Use HTTPS na hospedagem e uma senha exclusiva. Se as credenciais não estiverem configuradas, as rotas do monitor ficam desabilitadas.
 
-O painel atualiza o estado do worker a cada 15 segundos e mostra última execução, próximo disparo, intervalo, uptime, estado das integrações, horário da última execução bem-sucedida, falhas consecutivas, duração da última tentativa e histórico das últimas 50 execuções. As métricas e o histórico são mantidos em memória e reiniciam quando o processo é reiniciado; não são persistidos no banco de dados. Usuários autenticados podem definir uma data e horário específicos para a próxima execução. A data deve estar no futuro e dentro dos próximos 366 dias, e o agendador precisa estar ativo. Após essa execução, o agendamento retorna ao intervalo automático configurado.
+O painel atualiza o estado do worker a cada 15 segundos e mostra última execução, próximo disparo, intervalo, uptime, estado das integrações, horário da última execução bem-sucedida, falhas consecutivas, duração da última tentativa e as últimas 50 execuções. As métricas e o histórico são persistidos no banco SQLite local e permanecem disponíveis após reinícios. Usuários autenticados podem definir uma data e horário específicos para a próxima execução. A data deve estar no futuro e dentro dos próximos 366 dias, e o agendador precisa estar ativo. Após essa execução, o agendamento retorna ao intervalo automático configurado.
 
-A alteração manual do próximo disparo é mantida apenas na memória do processo: será perdida se o worker reiniciar ou se o agendamento for pausado. Ela não persiste a configuração no site, não altera a API da newsletter e não dispara e-mails imediatamente. Datas e horários são exibidos no fuso `America/Rio_Branco`.
+O horário personalizado do próximo disparo é persistido no banco SQLite local e restaurado após reinícios, desde que ainda esteja no futuro. Um horário vencido durante a indisponibilidade é ignorado e o worker agenda a próxima execução automática a partir da retomada. Pausar o agendador limpa o próximo horário pendente. A configuração local não altera a API da newsletter e não dispara e-mails imediatamente. Datas e horários são exibidos no fuso `America/Rio_Branco`.
+
+## Banco de dados local
+
+O worker usa SQLite por meio de `sql.js`, sem exigir um processo de banco separado ou compilação de módulos nativos. O arquivo padrão é `data/worker.db), relativo ao diretório de trabalho; configure `WORKER_DB_PATH=/app/data/worker.db` no Shardcloud caso o diretório de execução seja diferente. O arquivo é criado automaticamente e não deve ser versionado.
+
+As configurações do agendador, o último estado de saúde e o histórico das execuções ficam nesse arquivo. O histórico é retido por 90 dias por padrão; ajuste `WORKER_HISTORY_RETENTION_DAYS` entre 1 e 3650 dias. O painel exibe as 50 execuções mais recentes.
+
+A hospedagem precisa manter o arquivo em disco persistente. Esta configuração é destinada a uma única instância do worker: não compartilhe o mesmo arquivo SQLite entre réplicas. Mantenha backups do arquivo se precisar recuperar o histórico após exclusão acidental.
 
 ## Agendamento e operação
 
