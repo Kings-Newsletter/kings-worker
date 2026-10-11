@@ -230,14 +230,9 @@ const runCheck = async () => {
     return;
   }
 
+  let result;
   try {
-    const result = await newsletterClient.request();
-    lastRunStatus = result.data?.sent ? 'succeeded' : 'skipped';
-    lastRunErrorCode = null;
-    lastSuccessfulRunAt = new Date().toISOString();
-    consecutiveFailures = 0;
-    recordRun(startedAt, lastRunStatus);
-    logger.info('Resposta recebida da API', { status: result.status, runStatus: lastRunStatus });
+    result = await newsletterClient.request();
   } catch (error) {
     lastRunStatus = 'failed';
     const statusCode = error.message.match(/HTTP (\d{3})/i)?.[1];
@@ -246,6 +241,13 @@ const runCheck = async () => {
     recordRun(startedAt, lastRunStatus, lastRunErrorCode);
     throw error;
   }
+
+  lastRunStatus = result.data?.sent ? 'succeeded' : 'skipped';
+  lastRunErrorCode = null;
+  lastSuccessfulRunAt = new Date().toISOString();
+  consecutiveFailures = 0;
+  recordRun(startedAt, lastRunStatus);
+  logger.info('Resposta recebida da API', { status: result.status, runStatus: lastRunStatus });
 };
 
 const scheduler = createScheduler({
