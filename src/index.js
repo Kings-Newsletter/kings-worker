@@ -147,10 +147,10 @@ async function synchronizeControl() {
 const controlPollMs = Math.max(10_000, Math.min(300_000, Number(process.env.WORKER_CONTROL_POLL_MS || 30000)));
 let controlTimer;
 const { host, port } = getServerBinding();
-const server = app.listen(port, host, () => {
+const onListening = () => {
   const address = server.address();
   logger.info('Servidor iniciado', {
-    host,
+    host: typeof address === 'object' && address ? address.address : host ?? 'platform-default',
     port: typeof address === 'object' && address ? address.port : port,
     schedulerEnabled: localSchedulerEnabled,
     apiConfigured: newsletterClient.isConfigured,
@@ -163,7 +163,8 @@ const server = app.listen(port, host, () => {
   } else if (localSchedulerEnabled) {
     scheduler.start();
   }
-});
+};
+const server = host ? app.listen(port, host, onListening) : app.listen(port, onListening);
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   scheduler.stop();

@@ -10,7 +10,7 @@ Worker independente em Node.js + Express para executar verificações periódica
 - `npm test`
 - `npm start`
 
-O health check fica em `GET /health). Se `PORT` estiver vazio, o sistema operacional escolhe uma porta livre; em hospedagens, o worker aceita a porta fornecida pelo ambiente. Configure `SCHEDULER_ENABLED=false` para manter o processo sem agendador.
+O health check fica em `GET /health`. Se `PORT` estiver definida pela hospedagem, o worker usa essa porta; se estiver vazia, usa uma porta dinâmica. `HOST` é opcional: quando não definido, o Node.js escolhe o endereço de escuta padrão do ambiente. Não configure `HOST=localhost` em uma hospedagem que precise receber conexões externas. Configure `SCHEDULER_ENABLED=false` para manter o processo sem agendador.
 
 ## Integração com a newsletter
 
