@@ -32,7 +32,7 @@ O horário personalizado do próximo disparo é persistido no banco SQLite local
 
 ## Banco de dados local
 
-O worker usa SQLite por meio de `sql.js`, sem exigir um processo de banco separado ou compilação de módulos nativos. O arquivo padrão é `data/worker.db), relativo ao diretório de trabalho; configure `WORKER_DB_PATH=/app/data/worker.db` no Shardcloud caso o diretório de execução seja diferente. O arquivo é criado automaticamente e não deve ser versionado.
+O worker usa SQLite por meio de `sql.js`, sem exigir um processo de banco separado ou compilação de módulos nativos. O arquivo padrão é `data/worker.db`, relativo ao diretório de trabalho; configure `WORKER_DB_PATH=/app/data/worker.db` no Shardcloud caso o diretório de execução seja diferente. O arquivo é criado automaticamente e não deve ser versionado.
 
 As configurações do agendador, o último estado de saúde e o histórico das execuções ficam nesse arquivo. O histórico é retido por 90 dias por padrão; ajuste `WORKER_HISTORY_RETENTION_DAYS` entre 1 e 3650 dias. O painel exibe as 50 execuções mais recentes.
 
