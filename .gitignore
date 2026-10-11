@@ -6,3 +6,4 @@ npm-debug.log*
 coverage/
 test-results/
 dist/
+\ndata/\n*.db\n*.db-journal\n*.db-wal\n*.db-shm\n
