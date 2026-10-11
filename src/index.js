@@ -7,8 +7,31 @@ import { createScheduler } from './scheduler.js';
 import { createNewsletterClient } from './clients/newsletter.js';
 import { createWorkerControlClient } from './clients/control.js';
 import { getServerBinding } from './server-config.js';
+import { createWorkerStore } from './store.js';
 
 const logger = createLogger();
+const workerStore = await createWorkerStore();
+const savedConfig = workerStore.getConfig();
+const storedIntervalMs = savedConfig?.intervalMs;
+const defaultIntervalMs = Number(process.env.CHECK_INTERVAL_MS || 10800000);
+const initialIntervalMs = Number.isSafeInteger(storedIntervalMs) && storedIntervalMs >= 60 * 60 * 1000 && storedIntervalMs <= 168 * 60 * 60 * 1000
+  ? storedIntervalMs
+  : defaultIntervalMs;
+const localSchedulerEnabled = process.env.SCHEDULER_ENABLED !== 'false';
+const restoredEnabled = savedConfig?.enabled ?? localSchedulerEnabled;
+const storedNextRunAt = savedConfig?.nextRunAt ? new Date(savedConfig.nextRunAt) : null;
+const nextRunWasMissed = Boolean(storedNextRunAt && Number.isFinite(storedNextRunAt.getTime()) && storedNextRunAt.getTime() <= Date.now());
+const restoredNextRunAt = storedNextRunAt && Number.isFinite(storedNextRunAt.getTime()) && storedNextRunAt.getTime() > Date.now()
+  ? storedNextRunAt
+  : null;
+let scheduleMode = savedConfig?.scheduleMode === 'custom' && restoredNextRunAt && !nextRunWasMissed
+  ? 'custom'
+  : 'automatic';
+if (nextRunWasMissed) {
+  logger.warn('O próximo horário salvo já venceu; ele será ignorado para evitar um disparo inesperado', {
+    missedNextRunAt: storedNextRunAt.toISOString()
+  });
+}
 const app = express();
 app.use(express.urlencoded({ extended: false, limit: '2kb' }));
 app.use(express.json({ limit: '2kb' }));
@@ -30,7 +53,6 @@ const controlClient = createWorkerControlClient({
   heartbeatPath: process.env.WORKER_HEARTBEAT_PATH
 });
 const workerId = randomUUID();
-const localSchedulerEnabled = process.env.SCHEDULER_ENABLED !== 'false';
 const monitorUsername = process.env.MONITOR_USERNAME?.trim();
 const monitorPassword = process.env.MONITOR_PASSWORD;
 const monitorEnabled = Boolean(monitorUsername && monitorPassword);
@@ -38,13 +60,13 @@ const monitorPage = readFileSync(new URL('./monitor.html', import.meta.url), 'ut
 const monitorSessions = new Map();
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_COOKIE = 'worker_monitor_session';
-let lastRunStatus = null;
-let lastRunErrorCode = null;
-let lastRunDurationMs = null;
-let lastSuccessfulRunAt = null;
-let consecutiveFailures = 0;
-const recentRuns = [];
-const MAX_RECENT_RUNS = 50;
+const savedHealth = workerStore.getHealth();
+const previousRun = workerStore.getLatestRun();
+let lastRunStatus = previousRun?.status ?? null;
+let lastRunErrorCode = previousRun?.errorCode ?? null;
+let lastRunDurationMs = savedHealth.lastRunDurationMs;
+let lastSuccessfulRunAt = savedHealth.lastSuccessfulRunAt;
+let consecutiveFailures = savedHealth.consecutiveFailures;
 let lastControlSyncAt = null;
 let lastControlSyncStatus = null;
 let lastControlSyncErrorCode = null;
@@ -52,14 +74,26 @@ let lastControlSyncErrorCode = null;
 function recordRun(startedAt, status, errorCode = null) {
   const completedAt = new Date();
   lastRunDurationMs = Math.max(0, completedAt.getTime() - startedAt.getTime());
-  recentRuns.unshift({
-    startedAt: startedAt.toISOString(),
-    completedAt: completedAt.toISOString(),
+  workerStore.recordRun({
+    startedAt,
+    completedAt,
     durationMs: lastRunDurationMs,
     status,
-    errorCode
+    errorCode,
+    health: { lastSuccessfulRunAt, lastRunDurationMs, consecutiveFailures }
   });
-  if (recentRuns.length > MAX_RECENT_RUNS) recentRuns.length = MAX_RECENT_RUNS;
+  scheduleMode = 'automatic';
+  persistSchedulerConfig();
+}
+
+function persistSchedulerConfig(mode = scheduleMode) {
+  const state = scheduler.getState();
+  return workerStore.saveConfig({
+    enabled: state.enabled,
+    intervalMs: state.intervalMs,
+    nextRunAt: state.nextRunAt,
+    scheduleMode: mode
+  });
 }
 
 function equalSecret(supplied, expected) {
@@ -139,6 +173,8 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
     uptimeSeconds: Math.floor(process.uptime()),
     apiConfigured: newsletterClient.isConfigured,
     controlConfigured: controlClient.isConfigured,
+    storageConfigured: true,
+    storageType: 'sqlite',
     scheduler: scheduler.getState(),
     lastRunStatus,
     lastRunErrorCode,
@@ -147,7 +183,7 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
       lastRunDurationMs,
       consecutiveFailures
     },
-    recentRuns,
+    recentRuns: workerStore.getRecentRuns(50),
     lastControlSyncAt,
     lastControlSyncStatus,
     lastControlSyncErrorCode
@@ -171,6 +207,8 @@ app.post('/monitor/schedule', requireMonitorAuth, (req, res) => {
   }
   try {
     const scheduledAt = scheduler.setNextRunAt(date);
+    scheduleMode = 'custom';
+    persistSchedulerConfig();
     logger.info('Próximo disparo atualizado pelo monitor', { nextRunAt: scheduledAt });
     return res.json({ nextRunAt: scheduledAt });
   } catch (error) {
@@ -211,10 +249,14 @@ const runCheck = async () => {
 };
 
 const scheduler = createScheduler({
-  intervalMs: Number(process.env.CHECK_INTERVAL_MS || 10800000),
+  intervalMs: initialIntervalMs,
+  initialNextRunAt: restoredNextRunAt,
   task: runCheck,
   logger
 });
+if (!savedConfig || nextRunWasMissed || !restoredNextRunAt) {
+  persistSchedulerConfig(scheduleMode);
+}
 
 async function synchronizeControl() {
   if (!controlClient.isConfigured) return;
@@ -226,8 +268,12 @@ async function synchronizeControl() {
     if (!Number.isInteger(config.intervalHours) || config.intervalHours < 1 || config.intervalHours > 168 || typeof config.enabled !== 'boolean') {
       throw new Error('Configuração de agendamento inválida recebida do site.');
     }
-    scheduler.setIntervalMs(config.intervalHours * 60 * 60 * 1000);
+    scheduler.setIntervalMs(config.intervalHours * 60 * 60 * 1000, {
+      preserveNextRunAt: scheduleMode === 'custom'
+    });
     scheduler.setEnabled(localSchedulerEnabled && config.enabled);
+    if (!scheduler.getState().enabled) scheduleMode = 'automatic';
+    persistSchedulerConfig();
     const state = scheduler.getState();
     await controlClient.sendHeartbeat({
       workerId,
@@ -260,13 +306,18 @@ const onListening = () => {
     schedulerEnabled: localSchedulerEnabled,
     apiConfigured: newsletterClient.isConfigured,
     controlConfigured: controlClient.isConfigured,
+    storageType: 'sqlite',
+    storagePath: workerStore.path,
     monitorEnabled
   });
   if (controlClient.isConfigured) {
     void synchronizeControl();
     controlTimer = setInterval(() => void synchronizeControl(), controlPollMs);
-  } else if (localSchedulerEnabled) {
+  } else if (localSchedulerEnabled && restoredEnabled) {
     scheduler.start();
+    persistSchedulerConfig();
+  } else {
+    persistSchedulerConfig('automatic');
   }
 };
 const server = host ? app.listen(port, host, onListening) : app.listen(port, onListening);
@@ -274,5 +325,8 @@ const server = host ? app.listen(port, host, onListening) : app.listen(port, onL
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   scheduler.stop();
   if (controlTimer) clearInterval(controlTimer);
-  server.close(() => process.exit(0));
+  server.close(() => {
+    workerStore.close();
+    process.exit(0);
+  });
 });
