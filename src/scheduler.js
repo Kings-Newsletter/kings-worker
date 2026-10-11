@@ -3,6 +3,7 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
   let enabled = false;
   let running = false;
   let timer;
+  const idleResolvers = new Set();
   let lastRunAt = null;
   let nextRunAt = initialNextRunAt && Number.isFinite(new Date(initialNextRunAt).getTime())
     ? new Date(initialNextRunAt)
@@ -47,6 +48,8 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
     } finally {
       running = false;
       scheduleNext();
+      for (const resolve of idleResolvers) resolve();
+      idleResolvers.clear();
     }
   };
 
@@ -87,6 +90,9 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
       return nextRunAt.toISOString();
     },
     async tick() { return tick(); },
+    waitForIdle() {
+      return running ? new Promise(resolve => idleResolvers.add(resolve)) : Promise.resolve();
+    },
     getState() {
       return {
         enabled,
