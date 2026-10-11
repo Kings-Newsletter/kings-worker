@@ -67,9 +67,10 @@ let lastRunErrorCode = previousRun?.errorCode ?? null;
 let lastRunDurationMs = savedHealth.lastRunDurationMs;
 let lastSuccessfulRunAt = savedHealth.lastSuccessfulRunAt;
 let consecutiveFailures = savedHealth.consecutiveFailures;
-let lastControlSyncAt = null;
-let lastControlSyncStatus = null;
-let lastControlSyncErrorCode = null;
+const savedControlSync = workerStore.getState('controlSync') || {};
+let lastControlSyncAt = savedControlSync.lastControlSyncAt ?? null;
+let lastControlSyncStatus = savedControlSync.lastControlSyncStatus ?? null;
+let lastControlSyncErrorCode = savedControlSync.lastControlSyncErrorCode ?? null;
 let shuttingDown = false;
 
 function recordRun(startedAt, status, errorCode = null) {
@@ -85,6 +86,20 @@ function recordRun(startedAt, status, errorCode = null) {
   });
   scheduleMode = 'automatic';
   persistSchedulerConfig();
+}
+
+function persistControlSyncState() {
+  try {
+    workerStore.saveState('controlSync', {
+      lastControlSyncAt,
+      lastControlSyncStatus,
+      lastControlSyncErrorCode
+    });
+  } catch {
+    logger.error('Falha ao persistir estado da sincronização de controle', {
+      errorCode: 'CONTROL_SYNC_STATE_PERSIST_FAILED'
+    });
+  }
 }
 
 function persistSchedulerConfig(mode = scheduleMode) {
@@ -287,11 +302,13 @@ async function synchronizeControl() {
       lastRunErrorCode
     });
     lastControlSyncStatus = 'succeeded';
+    persistControlSyncState();
     logger.debug('Configuração do painel sincronizada', { revision: config.revision, intervalHours: config.intervalHours, enabled: state.enabled });
   } catch (error) {
     lastControlSyncStatus = 'failed';
     const statusCode = error.message.match(/HTTP (\d{3})/i)?.[1];
     lastControlSyncErrorCode = statusCode ? `CONTROL_HTTP_${statusCode}` : 'CONTROL_SYNC_FAILED';
+    persistControlSyncState();
     logger.warn('Falha ao sincronizar com o painel', { errorCode: lastControlSyncErrorCode });
   }
 }
