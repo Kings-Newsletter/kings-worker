@@ -254,10 +254,6 @@ const scheduler = createScheduler({
   task: runCheck,
   logger
 });
-if (!savedConfig || nextRunWasMissed || !restoredNextRunAt) {
-  persistSchedulerConfig(scheduleMode);
-}
-
 async function synchronizeControl() {
   if (!controlClient.isConfigured) return;
   lastControlSyncAt = new Date().toISOString();
