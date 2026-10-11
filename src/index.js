@@ -70,6 +70,7 @@ let consecutiveFailures = savedHealth.consecutiveFailures;
 let lastControlSyncAt = null;
 let lastControlSyncStatus = null;
 let lastControlSyncErrorCode = null;
+let shuttingDown = false;
 
 function recordRun(startedAt, status, errorCode = null) {
   const completedAt = new Date();
@@ -87,6 +88,7 @@ function recordRun(startedAt, status, errorCode = null) {
 }
 
 function persistSchedulerConfig(mode = scheduleMode) {
+  if (shuttingDown) return null;
   const state = scheduler.getState();
   return workerStore.saveConfig({
     enabled: state.enabled,
@@ -321,9 +323,12 @@ const onListening = () => {
 const server = host ? app.listen(port, host, onListening) : app.listen(port, onListening);
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   scheduler.stop();
   if (controlTimer) clearInterval(controlTimer);
-  server.close(() => {
+  const serverClosed = new Promise(resolve => server.close(resolve));
+  void Promise.all([serverClosed, scheduler.waitForIdle()]).finally(() => {
     workerStore.close();
     process.exit(0);
   });
