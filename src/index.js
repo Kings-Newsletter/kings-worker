@@ -8,9 +8,11 @@ import { createNewsletterClient } from './clients/newsletter.js';
 import { createWorkerControlClient } from './clients/control.js';
 import { getServerBinding } from './server-config.js';
 import { createWorkerStore } from './store.js';
+import { createSubscriberStore } from './clients/subscribers.js';
 
 const logger = createLogger();
 const workerStore = await createWorkerStore();
+const subscriberStore = createSubscriberStore();
 const savedConfig = workerStore.getConfig();
 const storedIntervalMs = savedConfig?.intervalMs;
 const defaultIntervalMs = Number(process.env.CHECK_INTERVAL_MS || 10800000);
@@ -183,6 +185,60 @@ app.post('/monitor/logout', requireMonitorAuth, (req, res) => {
   return res.json({ loggedOut: true });
 });
 
+app.get('/monitor/subscribers', requireMonitorAuth, async (_req, res) => {
+  if (!subscriberStore.isConfigured) {
+    return res.status(503).json({ error: 'Gerenciamento de e-mails indisponível: configure MONGODB_URI.' });
+  }
+  try {
+    const subscribers = await subscriberStore.list();
+    return res.json({ subscribers, limit: 500 });
+  } catch {
+    logger.warn('Falha ao consultar assinantes no MongoDB', { errorCode: 'SUBSCRIBER_LIST_FAILED' });
+    return res.status(503).json({ error: 'Não foi possível consultar os assinantes no MongoDB.' });
+  }
+});
+
+app.post('/monitor/subscribers', requireMonitorAuth, async (req, res) => {
+  if (!subscriberStore.isConfigured) {
+    return res.status(503).json({ error: 'Gerenciamento de e-mails indisponível: configure MONGODB_URI.' });
+  }
+  try {
+    const result = await subscriberStore.add(req.body?.email);
+    if (result.status === 'invalid_email') {
+      return res.status(400).json({ error: 'Informe um endereço de e-mail válido.' });
+    }
+    if (result.status === 'already_subscribed') {
+      return res.status(409).json({ error: 'Este endereço já está inscrito.' });
+    }
+    return res.status(201).json({ message: 'E-mail cadastrado e ativado sem confirmação.' });
+  } catch {
+    logger.warn('Falha ao cadastrar assinante no MongoDB', { errorCode: 'SUBSCRIBER_ADD_FAILED' });
+    return res.status(503).json({ error: 'Não foi possível cadastrar o e-mail no MongoDB.' });
+  }
+});
+
+app.delete('/monitor/subscribers', requireMonitorAuth, async (req, res) => {
+  if (!subscriberStore.isConfigured) {
+    return res.status(503).json({ error: 'Gerenciamento de e-mails indisponível: configure MONGODB_URI.' });
+  }
+  try {
+    const result = await subscriberStore.deactivate(req.body?.email);
+    if (result.status === 'invalid_email') {
+      return res.status(400).json({ error: 'Informe um endereço de e-mail válido.' });
+    }
+    if (result.status === 'not_found') {
+      return res.status(404).json({ error: 'E-mail não encontrado.' });
+    }
+    if (result.status === 'already_inactive') {
+      return res.status(409).json({ error: 'Este endereço já está inativo.' });
+    }
+    return res.json({ message: 'Inscrição desativada. O registro foi preservado.' });
+  } catch {
+    logger.warn('Falha ao desativar assinante no MongoDB', { errorCode: 'SUBSCRIBER_DEACTIVATE_FAILED' });
+    return res.status(503).json({ error: 'Não foi possível desativar o e-mail no MongoDB.' });
+  }
+});
+
 app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
   res.json({
     service: 'kings-newsletter-worker',
@@ -352,7 +408,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   scheduler.stop();
   if (controlTimer) clearInterval(controlTimer);
   const serverClosed = new Promise(resolve => server.close(resolve));
-  void Promise.all([serverClosed, scheduler.waitForIdle()]).finally(() => {
+  void Promise.all([serverClosed, scheduler.waitForIdle(), subscriberStore.close()]).finally(() => {
     workerStore.close();
     process.exit(0);
   });
