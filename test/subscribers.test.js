@@ -86,6 +86,29 @@ test('connects only to the expected database and creates a unique email index', 
   assert.equal(mongo.connected, false);
 });
 
+test('lists only public subscriber fields and never exposes unsubscribe tokens', async () => {
+  const { mongo, store } = createTestStore();
+  mongo.documents.set('reader@example.com', {
+    email: 'reader@example.com',
+    confirmed: true,
+    subscribedAt: new Date('2026-10-01T00:00:00.000Z'),
+    confirmedAt: new Date('2026-10-01T00:00:00.000Z'),
+    unsubscribeTokenHash: 'must-not-leak',
+    confirmationTokenHash: 'must-not-leak-either'
+  });
+  const [subscriber] = await store.list();
+  assert.deepEqual(Object.keys(subscriber).sort(), ['confirmed', 'confirmedAt', 'email', 'subscribedAt']);
+  assert.equal(subscriber.email, 'reader@example.com');
+  assert.equal(subscriber.confirmed, true);
+  await store.close();
+});
+
+test('reports missing MongoDB configuration without trying to connect', async () => {
+  const store = createSubscriberStore({ uri: '' });
+  assert.equal(store.isConfigured, false);
+  await assert.rejects(store.list(), /MONGODB_URI não configurada/);
+});
+
 test('adds an immediately confirmed subscriber and stores only a token hash', async () => {
   const { mongo, store } = createTestStore();
   assert.deepEqual(await store.add('  Reader@Example.com '), { status: 'added' });
