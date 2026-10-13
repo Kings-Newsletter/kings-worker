@@ -47,9 +47,11 @@ export function createSubscriberStore({
         await subscribers.createIndex({ email: 1 }, { unique: true });
         collection = subscribers;
         return collection;
-      })().catch(error => {
+      })().catch(async error => {
+        const failedClient = client;
         connectionPromise = null;
         client = null;
+        if (failedClient) await failedClient.close().catch(() => {});
         throw error;
       });
     }
