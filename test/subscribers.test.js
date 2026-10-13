@@ -23,6 +23,7 @@ function fakeMongo() {
         filter.confirmed?.$ne === true ? document.confirmed !== true :
         filter.confirmed === true ? document.confirmed === true : true
       );
+      if (!matches && document && !options.upsert) return { matchedCount: 0, modifiedCount: 0 };
       if (!matches && document && options.upsert) {
         const error = new Error('duplicate key');
         error.code = 11000;
