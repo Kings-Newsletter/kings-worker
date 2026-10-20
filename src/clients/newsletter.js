@@ -14,6 +14,19 @@ export function createNewsletterClient(config, { fetchImpl = fetch, sleep = ms =
           if (config.token) headers.authorization = `Bearer ${config.token}`;
           const response = await fetchImpl(url, { method: config.method, headers, signal: controller.signal });
           if (response.ok) return { status: response.status, data: await response.json() };
+          if (response.status === 409) {
+            const data = await response.json().catch(() => null);
+            const activeRunConflict = data?.code === 'NEWSLETTER_RUN_ACTIVE' ||
+              data?.reason === 'run_active' ||
+              /disparo em andamento/i.test(String(data?.error || ''));
+            if (activeRunConflict) {
+              return {
+                status: response.status,
+                data: { sent: false, skipped: true, reason: 'run_active' }
+              };
+            }
+            throw new Error(`API respondeu HTTP ${response.status}`);
+          }
           if (![408, 425, 429, 500, 502, 503, 504].includes(response.status)) throw new Error(`API respondeu HTTP ${response.status}`);
           const retryAfter = Number(response.headers.get('retry-after'));
           lastError = new Error(`API respondeu HTTP ${response.status}`);
