@@ -108,3 +108,32 @@ test('client retries transient server failures', async () => {
   const client = createNewsletterClient({ baseUrl: 'https://example.test', path: '/api/notify-news', method: 'POST', token: 'test-secret', maxRetries: 1, timeoutMs: 1000, retryBaseMs: 0 }, { sleep: async () => {}, fetchImpl: async () => { calls++; return calls === 1 ? { ok: false, status: 503, headers: { get: () => null } } : { ok: true, status: 200, json: async () => ({}) }; } });
   await client.request(); assert.equal(calls, 2);
 });
+
+test('client treats an active newsletter run conflict as a skipped check without retrying', async () => {
+  let calls = 0;
+  const client = createNewsletterClient({ baseUrl: 'https://example.test', path: '/api/notify-news', method: 'POST', token: 'test-secret', maxRetries: 3, timeoutMs: 1000, retryBaseMs: 0 }, {
+    fetchImpl: async () => {
+      calls++;
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'Já existe um disparo em andamento.' })
+      };
+    },
+    sleep: async () => {}
+  });
+
+  assert.deepEqual(await client.request(), {
+    status: 409,
+    data: { sent: false, skipped: true, reason: 'run_active' }
+  });
+  assert.equal(calls, 1);
+});
+
+test('client still reports unrelated API conflicts as errors', async () => {
+  const client = createNewsletterClient({ baseUrl: 'https://example.test', path: '/api/notify-news', method: 'POST', token: 'test-secret', maxRetries: 3, timeoutMs: 1000 }, {
+    fetchImpl: async () => ({ ok: false, status: 409, json: async () => ({ error: 'Conflict' }) })
+  });
+
+  await assert.rejects(client.request(), /HTTP 409/);
+});
