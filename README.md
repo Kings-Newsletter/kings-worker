@@ -45,3 +45,25 @@ Quando o controle remoto está configurado, a configuração salva no site preva
 ## Retry e segurança
 
 O cliente implementa retry limitado para falhas transitórias e `Retry-After`, sem repetir erros HTTP permanentes. Não registre tokens, cabeçalhos de autenticação ou corpos integrais de respostas. Restrinja o acesso às portas conforme o ambiente de hospedagem.
+
+## Migração de imagens para o Cloudflare R2
+
+O script `scripts/migrate-edition-images.js` processa somente as notícias associadas à edição com maior `issueNumber`. Ele aceita PNG/JPEG verificados pela assinatura binária, limita cada arquivo a 25 MiB, usa nomes de objeto determinísticos para evitar duplicações e altera somente o campo `image.url` depois de validar a URL pública.
+
+Configure no ambiente local as variáveis de migração listadas no fim de `.env.example`. O token Cloudflare precisa ter permissão para gravar objetos no bucket R2 indicado. Não publique tokens no repositório.
+
+Faça primeiro uma simulação:
+
+```bash
+npm run migrate:edition-images -- --dry-run
+```
+
+A simulação consulta a edição mais recente e baixa/valida as imagens, mas não faz uploads nem altera documentos. Para executar a migração real:
+
+```bash
+npm run migrate:edition-images
+```
+
+Cada operação transitória tem até cinco tentativas no total, com 10 segundos entre tentativas. Erros HTTP permanentes, como 403 ou 404 da origem, não são repetidos. O script verifica se o objeto público já existe antes de enviar novamente e usa uma atualização condicional no MongoDB para não sobrescrever URLs alteradas por outro processo. O relatório final lista a edição, os documentos processados, as atualizações, os itens ignorados e as falhas por notícia.
+
+O script depende de acesso de rede de saída para as imagens, a API do Cloudflare e o MongoDB Atlas. O endpoint de upload da API Cloudflare precisa estar autorizado pelo token. Não execute em produção antes de revisar as variáveis e confirmar que o domínio público do bucket está ativo.
