@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate:edition-images": "node scripts/migrate-edition-images.js"
   },
   "engines": {
     "node": ">=20"
