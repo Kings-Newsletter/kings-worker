@@ -153,7 +153,7 @@ async function main() {
     const db = client.db(config.database);
     const edition = await db.collection(config.editionsCollection).findOne(
       {},
-      { sort: { issueNumber: -1 }, projection: { issueNumber: 1, editionDate: 1, date: 1, _id: 1 } }
+      { sort: { issueNumber: -1 }, projection: { issueNumber: 1, editionDate: 1, date: 1, [config.editionDateField]: 1, _id: 1 } }
     );
     if (!edition) throw new Error(`No edition found in ${config.database}.${config.editionsCollection}`);
 
