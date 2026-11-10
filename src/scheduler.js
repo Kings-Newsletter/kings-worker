@@ -91,6 +91,16 @@ export function createScheduler({ intervalMs, task, logger, setTimer = setTimeou
       if (!running) scheduleNext();
       return nextRunAt.toISOString();
     },
+    // Brings the next run forward to `value` (e.g. the daily digest send time)
+    // when it would otherwise happen later. Returns true when it changed.
+    ensureRunBy(value) {
+      const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+      if (!enabled || !Number.isFinite(date.getTime()) || date.getTime() <= now()) return false;
+      if (nextRunAt && nextRunAt.getTime() <= date.getTime()) return false;
+      nextRunAt = date;
+      if (!running) scheduleNext();
+      return true;
+    },
     async tick() { return tick(); },
     waitForIdle() {
       return running ? new Promise(resolve => idleResolvers.add(resolve)) : Promise.resolve();

@@ -137,3 +137,19 @@ test('client still reports unrelated API conflicts as errors', async () => {
 
   await assert.rejects(client.request(), /HTTP 409/);
 });
+
+test('scheduler brings the next run forward to the daily digest time only when it is earlier', () => {
+  let delay;
+  const scheduler = createScheduler({ intervalMs: 10800000, task: async () => {}, logger: { warn() {}, error() {} }, setTimer: (_fn, ms) => { delay = ms; return 1; }, clearTimer() {} });
+  assert.equal(scheduler.ensureRunBy(new Date(Date.now() + 60_000)), false, 'disabled scheduler ignores the digest time');
+  scheduler.start();
+  const digestAt = new Date(Date.now() + 30 * 60_000);
+  assert.equal(scheduler.ensureRunBy(digestAt), true);
+  assert.equal(scheduler.getState().nextRunAt, digestAt.toISOString());
+  assert.ok(delay > 0 && delay <= 30 * 60_000);
+  assert.equal(scheduler.ensureRunBy(new Date(Date.now() + 2 * 60 * 60_000)), false, 'a later digest time keeps the earlier run');
+  assert.equal(scheduler.ensureRunBy(new Date(Date.now() - 60_000)), false, 'past times are ignored');
+  assert.equal(scheduler.ensureRunBy('not-a-date'), false);
+  assert.equal(scheduler.getState().nextRunAt, digestAt.toISOString());
+  scheduler.stop();
+});

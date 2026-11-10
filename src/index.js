@@ -351,6 +351,11 @@ async function synchronizeControl() {
     });
     scheduler.setEnabled(localSchedulerEnabled && config.enabled);
     if (!scheduler.getState().enabled) scheduleMode = 'automatic';
+    // The site sends the daily digest once its configured time passes; run
+    // exactly then instead of waiting for the next interval tick.
+    if (typeof config.nextDigestAt === 'string' && scheduler.ensureRunBy(new Date(config.nextDigestAt))) {
+      logger.info('Próxima execução ajustada para o horário do resumo diário', { nextRunAt: scheduler.getState().nextRunAt });
+    }
     persistSchedulerConfig();
     const state = scheduler.getState();
     await controlClient.sendHeartbeat({
