@@ -162,7 +162,7 @@ function requireMonitorAuth(req, res, next) {
 
 app.get('/health', (_req, res) => res.json({
   status: 'ok',
-  service: 'kings-newsletter-worker',
+  service: 'kings-worker',
   timestamp: new Date().toISOString()
 }));
 
@@ -253,7 +253,7 @@ app.delete('/monitor/subscribers', requireMonitorAuth, async (req, res) => {
 
 app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
   res.json({
-    service: 'kings-newsletter-worker',
+    service: 'kings-worker',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     apiConfigured: newsletterClient.isConfigured,

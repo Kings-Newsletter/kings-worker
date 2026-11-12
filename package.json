@@ -1,9 +1,9 @@
 {
-  "name": "kings-newsletter-worker",
+  "name": "kings-worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Worker da King's Newsletter: disparo da newsletter e coleta de dados do King's Sports",
+  "description": "Worker do King's Newsletter: serviço 24/7 que dispara a newsletter e coleta placares, jogos e tabelas do King's Sports",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",

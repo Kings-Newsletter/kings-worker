@@ -1,6 +1,11 @@
-# King's Newsletter — worker
+# King's Worker
 
-Worker independente em Node.js + Express que roda 24/7 para os projetos da King's Newsletter. Ele executa verificações periódicas e reporta o estado ao painel da newsletter. Também faz toda a coleta de dados do King's Sports, inclusive o placar ao vivo (veja [Coleta do King's Sports](#coleta-do-kings-sports)). O intervalo padrão é de 3 horas. O serviço não implementa envio SMTP: o disparo é solicitado à API oficial.
+Serviço 24/7 do King's Newsletter, em Node.js + Express, que executa as tarefas agendadas de todos os projetos:
+
+- **Newsletter:** verifica periodicamente e solicita o disparo à API oficial do site, reportando o estado ao painel. O intervalo padrão é de 3 horas. O worker não implementa envio SMTP.
+- **King's Sports:** faz toda a coleta de dados, inclusive o placar ao vivo a cada 15 segundos (veja [Coleta do King's Sports](#coleta-do-kings-sports)).
+
+Um monitor web protegido por login mostra o estado de cada tarefa.
 
 ## Requisitos e início
 
