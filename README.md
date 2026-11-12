@@ -1,6 +1,11 @@
-# King's Newsletter — worker
+# King's Worker
 
-Worker independente em Node.js + Express para executar verificações periódicas e reportar o estado ao painel da newsletter. O intervalo padrão é de 3 horas. O serviço não implementa envio SMTP: o disparo é solicitado à API oficial.
+Serviço 24/7 do King's Newsletter, em Node.js + Express, que executa as tarefas agendadas de todos os projetos:
+
+- **Newsletter:** verifica periodicamente e solicita o disparo à API oficial do site, reportando o estado ao painel. O intervalo padrão é de 3 horas. O worker não implementa envio SMTP.
+- **King's Sports:** faz toda a coleta de dados, inclusive o placar ao vivo a cada 15 segundos (veja [Coleta do King's Sports](#coleta-do-kings-sports)).
+
+Um monitor web protegido por login mostra o estado de cada tarefa.
 
 ## Requisitos e início
 
@@ -37,6 +42,38 @@ O worker usa SQLite por meio de `sql.js`, sem exigir um processo de banco separa
 As configurações do agendador, o último estado de saúde e o histórico das execuções ficam nesse arquivo. O histórico é retido por 90 dias por padrão; ajuste `WORKER_HISTORY_RETENTION_DAYS` entre 1 e 3650 dias. O painel exibe as 50 execuções mais recentes.
 
 A hospedagem precisa manter o arquivo em disco persistente. Esta configuração é destinada a uma única instância do worker: não compartilhe o mesmo arquivo SQLite entre réplicas. Mantenha backups do arquivo se precisar recuperar o histórico após exclusão acidental.
+
+## Coleta do King's Sports
+
+Toda a coleta de dados do King's Sports roda neste worker: placar ao vivo, jogos e tabelas, escudos e calendário da temporada. O portal só lê do MongoDB e não executa coleta nem cron na Vercel.
+
+A coleta fica em `src/sports/` e grava na coleção `sports` do mesmo banco da newsletter. Cada documento é separado por um campo `type`. A coleta nunca lê nem escreve nas coleções da newsletter.
+
+| Job | Quando roda | O que faz |
+| --- | --- | --- |
+| `live` | A cada `SPORTS_LIVE_EVERY_SEC` (15 s) | Atualiza placar e relógio. Só chama um provedor quando há jogo em andamento ou prestes a começar. |
+| `daily` | Ao iniciar e a cada 30 min, se a última execução tiver mais de 12 h | Jogos de ontem até sete dias à frente, tabelas e estatísticas de todas as ligas, além da Fórmula 1. |
+| `crests` | Logo depois de cada `daily` | Escudos que faltam (TheSportsDB). |
+| `season` | A cada 2 min | Calendário da temporada de cada liga, renovado uma vez por semana. Para em cerca de 45 s e continua na execução seguinte. |
+
+O `live` tem trava própria e nunca espera os jobs longos. `daily`, `crests` e `season` dividem outra trava, então não rodam ao mesmo tempo. Uma falha no Sports não afeta o agendador da newsletter.
+
+Para ligar, defina `SPORTS_INGEST_ENABLED=true` e `MONGODB_URI`. O estado de cada job aparece na página **Coleta do Sports** do monitor.
+
+### Fontes de dados
+
+| Provedor | Uso | Chave |
+| --- | --- | --- |
+| ESPN | Fonte principal: placares, calendários, tabelas e estatísticas | Não exige |
+| SportAPI | Reserva para futebol e NBA | `SPORTAPI_KEY` (opcional) |
+| OpenF1 e Jolpica | Fórmula 1 | Não exigem |
+| TheSportsDB | Escudos que faltam | Chave pública por padrão |
+
+As chamadas de cada provedor são contadas no MongoDB e respeitam tetos diários e mensais (veja `.env.example`). Ao alterar as competições acompanhadas, atualize `src/sports/catalog.js` e o `lib/catalog.ts` do portal juntos: o worker usa o catálogo para saber o que coletar, e o portal, para exibir.
+
+### Uma instância só
+
+As travas valem dentro de um processo. Rode uma única instância do worker com a coleta ligada; duas instâncias fariam chamadas duplicadas aos provedores.
 
 ## Agendamento e operação
 
