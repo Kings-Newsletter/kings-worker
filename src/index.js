@@ -9,10 +9,22 @@ import { createWorkerControlClient } from './clients/control.js';
 import { getServerBinding } from './server-config.js';
 import { createWorkerStore } from './store.js';
 import { createSubscriberStore } from './clients/subscribers.js';
+import { createSportsDatabase } from './sports/mongo.js';
+import { createSportsScheduler } from './sports/scheduler.js';
+import { runJob as runSportsJob } from './sports/run.js';
 
 const logger = createLogger();
 const workerStore = await createWorkerStore();
 const subscriberStore = createSubscriberStore();
+const sportsDatabase = createSportsDatabase();
+const sportsIngestEnabled = process.env.SPORTS_INGEST_ENABLED === 'true';
+const sportsLiveEverySec = Number.parseInt(process.env.SPORTS_LIVE_EVERY_SEC || '', 10);
+const sportsScheduler = createSportsScheduler({
+  getDb: () => sportsDatabase.getDb(),
+  runJob: runSportsJob,
+  logger,
+  liveEveryMs: (Number.isSafeInteger(sportsLiveEverySec) && sportsLiveEverySec >= 5 ? sportsLiveEverySec : 15) * 1000
+});
 const savedConfig = workerStore.getConfig();
 const storedIntervalMs = savedConfig?.intervalMs;
 const defaultIntervalMs = Number(process.env.CHECK_INTERVAL_MS || 10800000);
@@ -259,7 +271,11 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
     recentRuns: workerStore.getRecentRuns(50),
     lastControlSyncAt,
     lastControlSyncStatus,
-    lastControlSyncErrorCode
+    lastControlSyncErrorCode,
+    sports: {
+      configured: sportsIngestEnabled && sportsDatabase.isConfigured,
+      ...sportsScheduler.getState()
+    }
   });
 });
 
@@ -393,8 +409,14 @@ const onListening = () => {
     controlConfigured: controlClient.isConfigured,
     storageType: 'sqlite',
     storagePath: workerStore.path,
-    monitorEnabled
+    monitorEnabled,
+    sportsIngestEnabled: sportsIngestEnabled && sportsDatabase.isConfigured
   });
+  if (sportsIngestEnabled && sportsDatabase.isConfigured) {
+    sportsScheduler.start();
+  } else if (sportsIngestEnabled) {
+    logger.warn('Coleta do Sports não iniciada: configure MONGODB_URI');
+  }
   if (controlClient.isConfigured) {
     void synchronizeControl();
     controlTimer = setInterval(() => void synchronizeControl(), controlPollMs);
@@ -411,9 +433,15 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   if (shuttingDown) return;
   shuttingDown = true;
   scheduler.stop();
+  sportsScheduler.stop();
   if (controlTimer) clearInterval(controlTimer);
   const serverClosed = new Promise(resolve => server.close(resolve));
-  void Promise.all([serverClosed, scheduler.waitForIdle(), subscriberStore.close()]).finally(() => {
+  void Promise.all([
+    serverClosed,
+    scheduler.waitForIdle(),
+    sportsScheduler.waitForIdle().then(() => sportsDatabase.close()),
+    subscriberStore.close()
+  ]).finally(() => {
     workerStore.close();
     process.exit(0);
   });

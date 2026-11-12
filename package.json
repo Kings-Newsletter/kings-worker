@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Worker configurável para monitoramento da King's Newsletter",
+  "description": "Worker da King's Newsletter: disparo da newsletter e coleta de dados do King's Sports",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
