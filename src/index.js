@@ -12,6 +12,7 @@ import { createSubscriberStore } from './clients/subscribers.js';
 import { createSportsDatabase } from './sports/mongo.js';
 import { createSportsScheduler } from './sports/scheduler.js';
 import { runJob as runSportsJob } from './sports/run.js';
+import { createLegisWarmup } from './legis/aquecimento.js';
 
 const logger = createLogger();
 const workerStore = await createWorkerStore();
@@ -24,6 +25,12 @@ const sportsScheduler = createSportsScheduler({
   runJob: runSportsJob,
   logger,
   liveEveryMs: (Number.isSafeInteger(sportsLiveEverySec) && sportsLiveEverySec >= 5 ? sportsLiveEverySec : 15) * 1000
+});
+const legisWarmupEnabled = process.env.LEGIS_WARMUP_ENABLED === 'true';
+const legisWarmup = createLegisWarmup({
+  baseUrl: process.env.LEGIS_PORTAL_URL,
+  secret: process.env.LEGIS_CRON_SECRET,
+  logger
 });
 const savedConfig = workerStore.getConfig();
 const storedIntervalMs = savedConfig?.intervalMs;
@@ -275,6 +282,10 @@ app.get('/monitor/status', requireMonitorAuth, (_req, res) => {
     sports: {
       configured: sportsIngestEnabled && sportsDatabase.isConfigured,
       ...sportsScheduler.getState()
+    },
+    legis: {
+      ...legisWarmup.getState(),
+      configured: legisWarmupEnabled && legisWarmup.isConfigured
     }
   });
 });
@@ -410,8 +421,14 @@ const onListening = () => {
     storageType: 'sqlite',
     storagePath: workerStore.path,
     monitorEnabled,
-    sportsIngestEnabled: sportsIngestEnabled && sportsDatabase.isConfigured
+    sportsIngestEnabled: sportsIngestEnabled && sportsDatabase.isConfigured,
+    legisWarmupEnabled: legisWarmupEnabled && legisWarmup.isConfigured
   });
+  if (legisWarmupEnabled && legisWarmup.isConfigured) {
+    legisWarmup.start();
+  } else if (legisWarmupEnabled) {
+    logger.warn('Aquecimento do portal não iniciado: configure LEGIS_PORTAL_URL e LEGIS_CRON_SECRET');
+  }
   if (sportsIngestEnabled && sportsDatabase.isConfigured) {
     sportsScheduler.start();
   } else if (sportsIngestEnabled) {
@@ -434,12 +451,14 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   shuttingDown = true;
   scheduler.stop();
   sportsScheduler.stop();
+  legisWarmup.stop();
   if (controlTimer) clearInterval(controlTimer);
   const serverClosed = new Promise(resolve => server.close(resolve));
   void Promise.all([
     serverClosed,
     scheduler.waitForIdle(),
     sportsScheduler.waitForIdle().then(() => sportsDatabase.close()),
+    legisWarmup.waitForIdle(),
     subscriberStore.close()
   ]).finally(() => {
     workerStore.close();

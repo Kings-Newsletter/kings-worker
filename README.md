@@ -82,3 +82,24 @@ Quando o controle remoto está configurado, a configuração salva no site preva
 ## Retry e segurança
 
 O cliente implementa retry limitado para falhas transitórias e `Retry-After`, sem repetir erros HTTP permanentes. Não registre tokens, cabeçalhos de autenticação ou corpos integrais de respostas. Restrinja o acesso às portas conforme o ambiente de hospedagem.
+
+## Portal King's Legis e King's Radar
+
+O módulo `src/legis/aquecimento.js` mantém frescos os caches do portal kings-legis
+(Vercel), que lê direto das fontes oficiais. Nada é agendado na Vercel: o agendamento
+fica aqui.
+
+| Job | Quando (horário de Brasília) | Chama |
+| --- | --- | --- |
+| `radar` | a cada 30 min, das 6h às 22h | `GET {LEGIS_PORTAL_URL}/legis/api/aquecer?parte=radar` (edição do DOU e notícias de STF, STJ, TSE e TST) |
+| `perfis` | uma vez por dia, a partir das 6h | `GET {LEGIS_PORTAL_URL}/legis/api/aquecer?parte=perfis` (cota e folha do Senado, funcionários da Câmara, candidatos do TSE; 1 a 3 min) |
+
+Configuração (`.env`):
+
+- `LEGIS_WARMUP_ENABLED=true` liga o módulo.
+- `LEGIS_PORTAL_URL` é o endereço do projeto na Vercel (ex.: `https://kings-legis.vercel.app`).
+- `LEGIS_CRON_SECRET` é o mesmo valor de `CRON_SECRET` do projeto kings-legis na Vercel.
+
+Cada job tem a sua trava (o `perfis` nunca atrasa o `radar`). Uma falha do `perfis`
+tenta de novo depois de 30 min. O estado aparece em `/monitor/status` (campo `legis`) e
+no cartão "Portal King's Legis e Radar" da página Operações do monitor.
